@@ -1,0 +1,77 @@
+name: Create release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+    create-release:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Install zip
+              run: sudo apt install zip
+
+            - name: Install node
+              uses: actions/setup-node@v7
+              with:
+                node-version: latest
+
+            - name: Install PNPM
+              uses: pnpm/action-setup@v2
+              with:
+                version: latest
+
+            - name: Generate GitHub App token
+              id: app_token
+              uses: tibdex/github-app-token@v2
+              with:
+                app_id: ${{ secrets.APP_ID }}
+                private_key: ${{ secrets.APP_PRIVATE_KEY }}
+
+            - name: Get latest code
+              uses: actions/checkout@v6
+              with:
+                fetch-depth: 0
+                ref: ${{ github.event.repository.default_branch }}
+                token: ${{ steps.app_token.outputs.token }}
+
+            - name: Bump manifest version
+              run: node .github/actions/bump-manifest-version.js
+              env:
+                TGT_RELEASE_VERSION: ${{ github.ref_name }}
+
+            - name: Push version bump change
+              uses: EndBug/add-and-commit@v9
+              with:
+                add: fxmanifest.lua
+                push: true
+                default_author: github_actions
+                message: "chore: bump version to ${{ github.ref_name }}"
+
+            - name: Install dependencies
+              run: pnpm install --frozen-lockfile
+              working-directory: web/dev
+
+            - name: Build
+              run: pnpm build
+              working-directory: web/dev
+
+            - name: Bundle files
+              run: |
+                mkdir -p ./temp/lforge_notifications/web
+                cp ./{client/main.lua,README.md,LICENSE,fxmanifest.lua,Config.lua} ./temp/lforge_notifications
+                cp -r ./web/dev/dist ./temp/lforge_notifications/web/
+                cd ./temp && zip -r ../lforge_notifications.zip ./lforge_notifications
+
+            - name: Create release
+              uses: "marvinpinto/action-automatic-releases@v1.2.1"
+              with:
+                repo_token: ${{ secrets.GITHUB_TOKEN }}
+                prerelease: false
+                files: lforge_notifications.zip
+
+            - name: Update tag
+              uses: EndBug/latest-tag@v1
+              with:
+                ref: ${{ github.ref_name }}
